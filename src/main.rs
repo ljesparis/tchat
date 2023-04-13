@@ -1,5 +1,7 @@
 use std::{
+    collections::{hash_map::DefaultHasher, HashMap},
     env,
+    hash::{Hash, Hasher},
     io::{self, BufRead, BufReader, Write},
     net::{TcpListener, TcpStream},
     sync::mpsc::channel,
@@ -11,17 +13,34 @@ const HELP_TEXT: &str = "Usage:\n    ./tchat server\n    ./tchat client";
 const DEFAULT_ADDRESS: &str = "127.0.0.1";
 const DEFAULT_PORT: &str = "8080";
 
-struct Conn(TcpStream, );
+struct Conn(TcpStream, String, Option<u64>);
 
 impl Clone for Conn {
     fn clone(&self) -> Conn {
-        Conn(self.0.try_clone().unwrap())
+        Conn(self.0.try_clone().unwrap(), self.1.clone(), self.2)
+    }
+}
+
+impl Hash for Conn {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.1.hash(state)
     }
 }
 
 impl Conn {
-    fn new(conn: TcpStream) -> Self {
-        Self(conn)
+    fn new(conn: TcpStream, address: String) -> Self {
+        Self(conn, address, None)
+    }
+
+    fn id(&mut self) -> u64 {
+        if self.2.is_none() {
+            let mut hasher = DefaultHasher::new();
+            self.hash(&mut hasher);
+            self.2 = Some(hasher.finish());
+            self.2.unwrap()
+        } else {
+            self.2.unwrap()
+        }
     }
 
     fn configure(&mut self) -> Result<(), io::Error> {
@@ -65,30 +84,38 @@ impl<'a> Server<'a> {
                     _ => {}
                 }
 
-                let mut messagess: Vec<String> = Vec::new();
+                let mut messagess_by_conn_id: HashMap<u64, String> = HashMap::new();
                 for conn in conns.iter_mut() {
                     let data = conn.read().unwrap_or_else(|_| "".to_string());
-                    messagess.push(data);
-                }
-
-                for conn in conns.iter_mut() {
-                    for message in messagess.iter() {
-                        conn.write(message.as_bytes()).unwrap_or_else(|err| {
-                            println!("{err}");
-                        });
+                    if data.len() > 0 {
+                        messagess_by_conn_id.insert(conn.id(), data);
                     }
                 }
 
-                messagess.clear();
+                for (conn_id, msg) in messagess_by_conn_id.iter() {
+                    for conn in conns.iter_mut() {
+                        if *conn_id == conn.id() {
+                            continue;
+                        }
+
+                        conn.write(msg.as_bytes())
+                            .unwrap_or_else(|err| println!("{err}"));
+                    }
+                }
+
+                messagess_by_conn_id.clear();
             }
         });
 
         for c in listener.incoming() {
             match c {
                 Ok(conn) => {
-                    println!("Client with ip: {:?} connected", conn.peer_addr().unwrap());
+                    let remote_address = conn.peer_addr()?;
+                    let remote_address =
+                        format!("{}:{}", remote_address.ip(), remote_address.port());
+                    println!("Client with ip: {remote_address} connected");
 
-                    let mut conn = Conn::new(conn);
+                    let mut conn = Conn::new(conn, remote_address);
                     if let Err(err) = conn.configure() {
                         println!("Error configuring the connection. {err}");
                         continue;
@@ -118,7 +145,7 @@ impl<'a> Client<'a> {
     fn connect(&self) -> Result<(), io::Error> {
         let address = self.0;
         let conn = TcpStream::connect(address)?;
-        let mut conn = Conn::new(conn);
+        let mut conn = Conn::new(conn, "".to_string());
         conn.configure()?;
 
         let mut cloned_conn = conn.clone();
