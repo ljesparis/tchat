@@ -37,8 +37,8 @@ impl Conn {
         Ok(buff)
     }
 
-    fn write(&mut self, content: &str) -> Result<(), io::Error> {
-        self.0.write_all(content.as_bytes())?;
+    fn write(&mut self, content: &[u8]) -> Result<(), io::Error> {
+        self.0.write_all(content)?;
         self.0.flush()?;
         Ok(())
     }
@@ -74,7 +74,7 @@ impl<'a> Server<'a> {
 
                 for conn in conns.iter_mut() {
                     for message in messagess.iter() {
-                        conn.write(message).unwrap_or_else(|err| {
+                        conn.write(message.as_bytes()).unwrap_or_else(|err| {
                             println!("{err}");
                         });
                     }
@@ -129,15 +129,9 @@ impl<'a> Client<'a> {
         });
 
         loop {
-            print!(">>> ");
             let mut in_buff = String::new();
-
-            io::stdin().read_line(&mut in_buff).unwrap_or_else(|err| {
-                println!("Error reading the standard input {err}.");
-                0
-            });
-
-            conn.write(&in_buff)?;
+            io::stdin().read_line(&mut in_buff)?;
+            conn.write(in_buff.as_bytes())?;
         }
     }
 }
