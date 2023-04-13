@@ -1,6 +1,6 @@
 use std::{
     env,
-    io::{self, Read, Write},
+    io::{self, BufRead, BufReader, Write},
     net::{TcpListener, TcpStream},
     sync::mpsc::channel,
     thread,
@@ -24,27 +24,23 @@ impl Conn {
         Self(conn)
     }
 
-    fn configure(&mut self) -> Result<bool, io::Error> {
-        match self.0.set_nonblocking(true) {
-            Err(err) => Err(err),
-            Ok(_) => match self.0.set_nodelay(true) {
-                Err(err) => Err(err),
-                Ok(_) => Ok(true),
-            },
-        }
+    fn configure(&mut self) -> Result<(), io::Error> {
+        self.0.set_nonblocking(true)?;
+        self.0.set_nodelay(true)?;
+        Ok(())
     }
 
-    fn read(&mut self) -> String {
+    fn read(&mut self) -> Result<String, io::Error> {
         let mut buff = String::new();
-        self.0.read_to_string(&mut buff).unwrap_or_else(|_| 0);
-        buff
+        let mut reader = BufReader::new(&self.0);
+        reader.read_line(&mut buff)?;
+        Ok(buff)
     }
 
-    fn write(&mut self, content: &String) {
-        self.0
-            .write_all(content.as_bytes())
-            .unwrap_or_else(|err| println!("Error writing to buffer {err}"));
-        self.0.flush().unwrap();
+    fn write(&mut self, content: &str) -> Result<(), io::Error> {
+        self.0.write_all(content.as_bytes())?;
+        self.0.flush()?;
+        Ok(())
     }
 }
 
@@ -72,13 +68,15 @@ impl<'a> Server<'a> {
 
                 let mut messagess: Vec<String> = Vec::new();
                 for conn in conns.iter_mut() {
-                    let data = conn.read();
+                    let data = conn.read().unwrap_or_else(|_| "".to_string());
                     messagess.push(data);
                 }
 
                 for conn in conns.iter_mut() {
                     for message in messagess.iter() {
-                        conn.write(message);
+                        conn.write(message).unwrap_or_else(|err| {
+                            println!("{err}");
+                        });
                     }
                 }
 
@@ -92,10 +90,8 @@ impl<'a> Server<'a> {
                     println!("Client with ip: {:?} connected", conn.peer_addr().unwrap());
 
                     let mut conn = Conn::new(conn);
-                    if !conn.configure().unwrap_or_else(|err| {
+                    if let Err(err) = conn.configure() {
                         println!("Error configuring the connection. {err}");
-                        false
-                    }) {
                         continue;
                     }
 
@@ -118,43 +114,30 @@ impl<'a> Client<'a> {
         Self(address)
     }
 
-    fn connect(&self) {
+    fn connect(&self) -> Result<(), io::Error> {
         let address = self.0;
-        match TcpStream::connect(address) {
-            Ok(conn) => {
-                let mut conn = Conn::new(conn);
-                if !conn.configure().unwrap_or_else(|err| {
-                    println!("Error configuring the connection. {err}");
-                    false
-                }) {
-                    return;
-                };
+        let conn = TcpStream::connect(address)?;
+        let mut conn = Conn::new(conn);
+        conn.configure()?;
 
-                let mut cloned_conn = conn.clone();
-                thread::spawn(move || loop {
-                    let buff = cloned_conn.read();
-                    if buff.len() > 0 {
-                        println!("<Server> {buff}");
-                    }
-                });
-
-                loop {
-                    print!(">>> ");
-                    let mut in_buff = String::new();
-
-                    io::stdin().read_line(&mut in_buff).unwrap_or_else(|err| {
-                        println!("Error reading the standard input {err}.");
-                        0
-                    });
-
-                    conn.write(&in_buff);
-                }
+        let mut cloned_conn = conn.clone();
+        thread::spawn(move || loop {
+            let buff = cloned_conn.read().unwrap_or_else(|_| "".to_string());
+            if buff.len() > 0 {
+                println!("<Server> {buff}");
             }
-            Err(err) => {
-                println!(
-                    "Error trying to connect to {address} with the following error => '{err}'."
-                );
-            }
+        });
+
+        loop {
+            print!(">>> ");
+            let mut in_buff = String::new();
+
+            io::stdin().read_line(&mut in_buff).unwrap_or_else(|err| {
+                println!("Error reading the standard input {err}.");
+                0
+            });
+
+            conn.write(&in_buff)?;
         }
     }
 }
@@ -171,7 +154,9 @@ fn main() {
                 let mut server = Server::new(default_address.as_str());
                 server.run()
             }
-            "client" => Client::new(default_address.as_str()).connect(),
+            "client" => Client::new(default_address.as_str())
+                .connect()
+                .unwrap_or_else(|err| println!("{err}")),
             _ => {
                 println!("{HELP_TEXT}")
             }
