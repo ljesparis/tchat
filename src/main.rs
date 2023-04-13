@@ -20,6 +20,20 @@ impl Clone for Conn {
 }
 
 impl Conn {
+    fn new(conn: TcpStream) -> Self {
+        Self(conn)
+    }
+
+    fn configure(&mut self) -> Result<bool, io::Error> {
+        match self.0.set_nonblocking(true) {
+            Err(err) => Err(err),
+            Ok(_) => match self.0.set_nodelay(true) {
+                Err(err) => Err(err),
+                Ok(_) => Ok(true),
+            },
+        }
+    }
+
     fn read(&mut self) -> String {
         let mut buff = String::new();
         self.0.read_to_string(&mut buff).unwrap_or_else(|_| 0);
@@ -27,7 +41,9 @@ impl Conn {
     }
 
     fn write(&mut self, content: &String) {
-        self.0.write_all(content.as_bytes()).unwrap_or_else(|err| println!("Error writing to buffer {err}"));
+        self.0
+            .write_all(content.as_bytes())
+            .unwrap_or_else(|err| println!("Error writing to buffer {err}"));
         self.0.flush().unwrap();
     }
 }
@@ -73,17 +89,17 @@ impl<'a> Server<'a> {
         for c in listener.incoming() {
             match c {
                 Ok(conn) => {
-                    match conn.set_nonblocking(true) {
-                        Err(err) => {
-                            println!("Error setting the stream non blocking: {err}");
-                            continue;
-                        }
-                        _ => 0,
-                    };
-                    conn.set_nodelay(true).unwrap();
-
                     println!("Client with ip: {:?} connected", conn.peer_addr().unwrap());
-                    tx.send(Conn(conn)).unwrap_or_else(|err| {
+
+                    let mut conn = Conn::new(conn);
+                    if !conn.configure().unwrap_or_else(|err| {
+                        println!("Error configuring the connection. {err}");
+                        false
+                    }) {
+                        continue;
+                    }
+
+                    tx.send(conn).unwrap_or_else(|err| {
                         println!("Error happend trying to send client conn to thread. {err}");
                     });
                 }
@@ -106,12 +122,17 @@ impl<'a> Client<'a> {
         let address = self.0;
         match TcpStream::connect(address) {
             Ok(conn) => {
-                conn.set_nonblocking(true).unwrap();
-                conn.set_nodelay(true).unwrap();
-                let mut conn = Conn(conn);
+                let mut conn = Conn::new(conn);
+                if !conn.configure().unwrap_or_else(|err| {
+                    println!("Error configuring the connection. {err}");
+                    false
+                }) {
+                    return;
+                };
+
                 let mut cloned_conn = conn.clone();
                 thread::spawn(move || loop {
-                    let buff = cloned_conn.read(); 
+                    let buff = cloned_conn.read();
                     if buff.len() > 0 {
                         println!("<Server> {buff}");
                     }
