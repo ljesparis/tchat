@@ -11,7 +11,7 @@ const HELP_TEXT: &str = "Usage:\n    ./tchat server\n    ./tchat client";
 const DEFAULT_ADDRESS: &str = "127.0.0.1";
 const DEFAULT_PORT: &str = "8080";
 
-struct Conn(TcpStream);
+struct Conn(TcpStream, );
 
 impl Clone for Conn {
     fn clone(&self) -> Conn {
@@ -51,9 +51,8 @@ impl<'a> Server<'a> {
         Self(address, Vec::new())
     }
 
-    fn run(&mut self) {
-        let listener = TcpListener::bind(self.0)
-            .unwrap_or_else(|err| panic!("The following error happend {err}"));
+    fn run(&mut self) -> Result<(), io::Error> {
+        let listener = TcpListener::bind(self.0)?;
 
         let (tx, rx) = channel::<Conn>();
         thread::spawn(move || {
@@ -104,6 +103,8 @@ impl<'a> Server<'a> {
                 }
             }
         }
+
+        Ok(())
     }
 }
 
@@ -144,10 +145,9 @@ fn main() {
         let subcommand = &args[1];
         let default_address = format!("{DEFAULT_ADDRESS}:{DEFAULT_PORT}");
         match subcommand.as_str() {
-            "server" => {
-                let mut server = Server::new(default_address.as_str());
-                server.run()
-            }
+            "server" => Server::new(default_address.as_str())
+                .run()
+                .unwrap_or_else(|err| println!("{err}")),
             "client" => Client::new(default_address.as_str())
                 .connect()
                 .unwrap_or_else(|err| println!("{err}")),
