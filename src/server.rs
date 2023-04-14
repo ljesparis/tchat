@@ -17,34 +17,42 @@ fn generate_hash(c: String) -> u64 {
 }
 
 struct StreamPool {
-    pool: Vec<TcpStreamWrapper>,
+    pool: HashMap<u64, TcpStreamWrapper>,
 }
 
 impl StreamPool {
     fn new() -> Self {
-        Self { pool: Vec::new() }
+        Self {
+            pool: HashMap::new(),
+        }
     }
 
     fn add_strean(&mut self, stream: TcpStreamWrapper) {
-        self.pool.push(stream)
+        self.pool.insert(stream.id, stream);
     }
 
     fn read_message_from_nodes(&mut self) -> HashMap<u64, String> {
-        let mut messagess_by_conn_id: HashMap<u64, String> = HashMap::new();
-        for stream in self.pool.iter_mut() {
-            let data = stream.read().unwrap_or_else(|_| "".to_string());
-            if data.len() > 0 {
-                messagess_by_conn_id.insert(stream.id, data);
-            }
-        }
+        let messagess_by_conn_id = self
+            .pool
+            .iter_mut()
+            .map(|(&stream_id, stream)| {
+                let data = match stream.read() {
+                    Err(_) => "".to_string(),
+                    Ok(d) => d,
+                };
+
+                (stream_id, data)
+            })
+            .filter(|(_, msg)| msg.len() > 0)
+            .collect::<HashMap<u64, String>>();
 
         messagess_by_conn_id
     }
 
     fn broadcast_message(&mut self, messages_by_stream_id: HashMap<u64, String>) {
-        for (stream_id, msg) in messages_by_stream_id.iter() {
-            for stream in self.pool.iter_mut() {
-                if *stream_id == stream.id {
+        for (_, stream) in self.pool.iter_mut() {
+            for (&stream_id, msg) in messages_by_stream_id.iter() {
+                if stream.id == stream_id {
                     continue;
                 }
 
