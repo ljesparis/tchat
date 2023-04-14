@@ -3,12 +3,13 @@ use std::{
     hash::{Hash, Hasher},
     io,
     net::TcpListener,
-    sync::mpsc::channel,
+    sync::mpsc::{channel, Sender},
     thread,
     time::Duration,
 };
 
-use super::tcp;
+use crate::tcp::TcpStreamWrapper;
+
 
 fn generate_hash(c: String) -> u64 {
     let mut hasher = DefaultHasher::new();
@@ -27,10 +28,41 @@ impl<'a> Server<'a> {
 
     pub fn run(&mut self) -> Result<(), io::Error> {
         let listener = TcpListener::bind(self.address)?;
+        let tx = self.start_background();
+        for incoming_stream in listener.incoming() {
+            match incoming_stream {
+                Ok(stream) => {
+                    let remote_address = stream.peer_addr()?;
+                    let remote_address =
+                        format!("{}:{}", remote_address.ip(), remote_address.port());
+                    println!("Client with ip: {remote_address} connected.");
 
-        let (tx, rx) = channel::<tcp::TcpStreamWrapper>();
+                    let mut conn =
+                        TcpStreamWrapper::new(stream, generate_hash(remote_address));
+                    if let Err(err) = conn.configure() {
+                        println!("Unable to configure stream -> '{err}'.");
+                        println!("Trying to shutdown stream.");
+                        conn.shutdown_conn().unwrap_or_else(|_| {});
+                        continue;
+                    }
+
+                    tx.send(conn).unwrap_or_else(|err| {
+                        println!("Unable to send stream to pool -> '{err}'.");
+                    });
+                }
+                Err(err) => {
+                    println!("Unkown error -> '{err}'.")
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn start_background(&self) -> Sender<TcpStreamWrapper> {
+        let (tx, rx) = channel::<TcpStreamWrapper>();
         thread::spawn(move || {
-            let mut stream_pool: Vec<tcp::TcpStreamWrapper> = Vec::new();
+            let mut stream_pool: Vec<TcpStreamWrapper> = Vec::new();
             loop {
                 match rx.recv_timeout(Duration::from_nanos(10)) {
                     Ok(stream) => {
@@ -63,30 +95,6 @@ impl<'a> Server<'a> {
             }
         });
 
-        for c in listener.incoming() {
-            match c {
-                Ok(conn) => {
-                    let remote_address = conn.peer_addr()?;
-                    let remote_address =
-                        format!("{}:{}", remote_address.ip(), remote_address.port());
-                    println!("Client with ip: {remote_address} connected");
-
-                    let mut conn = tcp::TcpStreamWrapper::new(conn, generate_hash(remote_address));
-                    if let Err(err) = conn.configure() {
-                        println!("Error configuring the connection. {err}");
-                        continue;
-                    }
-
-                    tx.send(conn).unwrap_or_else(|err| {
-                        println!("Error happend trying to send client conn to thread. {err}");
-                    });
-                }
-                Err(err) => {
-                    println!("error: {err}")
-                }
-            }
-        }
-
-        Ok(())
+        tx
     }
 }

@@ -3,31 +3,34 @@ use std::{
     net::TcpStream,
 };
 
-
 // i'm lazy with names
 pub struct TcpStreamWrapper {
     stream: TcpStream,
-    pub id: u64
-} 
-
+    pub id: u64,
+}
 
 impl Clone for TcpStreamWrapper {
     fn clone(&self) -> Self {
-        Self{
+        Self {
             stream: self.stream.try_clone().unwrap(),
-            id: self.id
+            id: self.id,
         }
     }
 }
 
 impl TcpStreamWrapper {
     pub fn new(stream: TcpStream, id: u64) -> Self {
-        Self {stream, id }
+        Self { stream, id }
     }
 
     pub fn configure(&mut self) -> Result<(), io::Error> {
         self.stream.set_nonblocking(true)?;
         self.stream.set_nodelay(true)?;
+        Ok(())
+    }
+
+    pub fn shutdown_conn(&self) -> Result<(), io::Error> {
+        self.stream.shutdown(std::net::Shutdown::Both)?;
         Ok(())
     }
 

@@ -1,6 +1,6 @@
 use std::{io, net::TcpStream, thread};
 
-use super::tcp;
+use crate::tcp::TcpStreamWrapper;
 
 pub struct Client<'a> {
     address: &'a str,
@@ -14,12 +14,13 @@ impl<'a> Client<'a> {
     pub fn connect(&self) -> Result<(), io::Error> {
         let address = self.address;
         let conn = TcpStream::connect(address)?;
-        let mut conn = tcp::TcpStreamWrapper::new(conn, 0);
+        let mut conn = TcpStreamWrapper::new(conn, 0);
 
         let mut cloned_conn = conn.clone();
         thread::spawn(move || loop {
-            let buff = cloned_conn.read().unwrap_or_else(|_| "".to_string());
+            let mut buff = cloned_conn.read().unwrap_or_else(|_| "".to_string());
             if buff.len() > 0 {
+                buff.truncate(buff.len() - 1);
                 println!("<Server> {buff}");
             }
         });
