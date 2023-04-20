@@ -1,4 +1,4 @@
 tchat
 ---
 
-This is a simple example in rust and sockets. 
+This is a simple example chat in rust.  I use nonblocking sockets.
