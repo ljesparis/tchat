@@ -19,7 +19,7 @@ impl<'a> Client<'a> {
         let mut cloned_conn = conn.clone();
         thread::spawn(move || loop {
             let mut buff = cloned_conn.read().unwrap_or_else(|_| "".to_string());
-            if buff.len() > 0 {
+            if !buff.is_empty() {
                 buff.truncate(buff.len() - 1);
                 println!("<Server> {buff}");
             }

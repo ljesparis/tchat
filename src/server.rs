@@ -43,7 +43,7 @@ impl StreamPool {
 
                 (stream_id, data)
             })
-            .filter(|(_, msg)| msg.len() > 0)
+            .filter(|(_, msg)| !msg.is_empty())
             .collect::<HashMap<u64, String>>();
 
         messagess_by_conn_id
@@ -88,7 +88,7 @@ impl<'a> Server<'a> {
                     if let Err(err) = conn.configure() {
                         println!("Unable to configure stream -> '{err}'.");
                         println!("Trying to shutdown stream.");
-                        conn.shutdown_conn().unwrap_or_else(|_| {});
+                        conn.shutdown_conn().unwrap_or({});
                         continue;
                     }
 
